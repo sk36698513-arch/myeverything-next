@@ -42,6 +42,7 @@ export function DashboardScreen({ navigation }: Props) {
   const [mentorReply, setMentorReply] = useState<string | null>(null);
   const [mentorError, setMentorError] = useState<string | null>(null);
   const [mentorSending, setMentorSending] = useState(false);
+  const mentorSendingRef = useRef(false);
   const [autoPickerOpen, setAutoPickerOpen] = useState(false);
   const [autoStart, setAutoStart] = useState<Date | null>(null);
   const [autoEnd, setAutoEnd] = useState<Date | null>(null);
@@ -75,13 +76,14 @@ export function DashboardScreen({ navigation }: Props) {
   const last = logs[0];
 
   async function askMentorInline() {
-    if (mentorSending) return;
+    if (mentorSendingRef.current) return;
     const msg = mentorDraft.trim();
     if (!msg) {
       Alert.alert(t("mentorEmptyTitle"), t("mentorEmptyBody"));
       return;
     }
 
+    mentorSendingRef.current = true;
     setMentorSending(true);
     setMentorReply(null);
     setMentorError(null);
@@ -113,6 +115,7 @@ export function DashboardScreen({ navigation }: Props) {
       );
     } finally {
       setMentorSending(false);
+      mentorSendingRef.current = false;
     }
   }
 

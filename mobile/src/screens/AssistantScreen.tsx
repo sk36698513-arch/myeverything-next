@@ -33,6 +33,7 @@ export function AssistantScreen({ navigation }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
   const listRef = useRef<FlatList<ChatMessage> | null>(null);
   const { t, locale } = useI18n();
 
@@ -72,9 +73,10 @@ export function AssistantScreen({ navigation }: Props) {
   }, [messages.length]);
 
   async function send() {
-    if (sending) return;
+    if (sendingRef.current) return;
     const trimmed = text.trim();
     if (!trimmed) return;
+    sendingRef.current = true;
     setText("");
 
     const userMsg: ChatMessage = {
@@ -111,6 +113,7 @@ export function AssistantScreen({ navigation }: Props) {
       setMessages((prev) => prev.map((m) => (m.id === thinkingId ? reply : m)));
     } finally {
       setSending(false);
+      sendingRef.current = false;
     }
   }
 
