@@ -60,6 +60,11 @@ export type I18nKey =
   | "assistantSubtitle"
   | "assistantPlaceholder"
   | "send"
+  | "mentorQuickPlaceholder"
+  | "btnAskMentor"
+  | "mentorSending"
+  | "mentorEmptyTitle"
+  | "mentorEmptyBody"
   | "reviewTitle"
   | "prevMonth"
   | "nextMonth"
@@ -135,6 +140,11 @@ export const translations: Record<Locale, Dict> = {
     assistantSubtitle: "판단 대신 질문으로, 나를 정리하는 대화",
     assistantPlaceholder: "여기에 마음을 적어보세요...",
     send: "보내기",
+    mentorQuickPlaceholder: "지금 고민을 한 문장으로 적어보세요…",
+    btnAskMentor: "조언받기",
+    mentorSending: "생각중...",
+    mentorEmptyTitle: "내용이 비어 있어요",
+    mentorEmptyBody: "한 문장만 적어도 괜찮아요.",
     reviewTitle: "회고",
     prevMonth: "이전 달",
     nextMonth: "다음 달",
@@ -208,6 +218,11 @@ export const translations: Record<Locale, Dict> = {
     assistantSubtitle: "A conversation that organizes your thoughts with questions, not judgments",
     assistantPlaceholder: "Type what you feel...",
     send: "Send",
+    mentorQuickPlaceholder: "Write your concern in one sentence…",
+    btnAskMentor: "Get advice",
+    mentorSending: "Thinking...",
+    mentorEmptyTitle: "Your message is empty",
+    mentorEmptyBody: "Even one sentence is enough.",
     reviewTitle: "Review",
     prevMonth: "Prev",
     nextMonth: "Next",
@@ -281,6 +296,11 @@ export const translations: Record<Locale, Dict> = {
     assistantSubtitle: "判断ではなく質問で、考えを整える対話",
     assistantPlaceholder: "ここに気持ちを書いてください…",
     send: "送信",
+    mentorQuickPlaceholder: "いまの悩みを一文で書いてください…",
+    btnAskMentor: "アドバイス",
+    mentorSending: "考えています…",
+    mentorEmptyTitle: "内容が空です",
+    mentorEmptyBody: "一文だけでも大丈夫です。",
     reviewTitle: "振り返り",
     prevMonth: "前の月",
     nextMonth: "次の月",

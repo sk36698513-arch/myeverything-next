@@ -18,6 +18,7 @@ import type { ChatMessage, DailyLog } from "../types";
 import { loadLogs } from "../storage/logs";
 import { loadChat, appendChat } from "../storage/chat";
 import { makeAssistantReply } from "../ai/assistant";
+import { fetchMentorAdvice } from "../ai/mentorApi";
 import { makeId } from "../lib/id";
 import { useI18n } from "../i18n/i18n";
 
@@ -31,6 +32,7 @@ export function AssistantScreen({ navigation }: Props) {
   const [logs, setLogs] = useState<DailyLog[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
   const listRef = useRef<FlatList<ChatMessage> | null>(null);
   const { t, locale } = useI18n();
 
@@ -69,7 +71,8 @@ export function AssistantScreen({ navigation }: Props) {
     return () => clearTimeout(t);
   }, [messages.length]);
 
-  function send() {
+  async function send() {
+    if (sending) return;
     const trimmed = text.trim();
     if (!trimmed) return;
     setText("");
@@ -81,8 +84,34 @@ export function AssistantScreen({ navigation }: Props) {
       createdAtISO: nowISO(),
     };
 
-    const reply = makeAssistantReply({ userText: trimmed, logs, locale });
-    setMessages((prev) => [...prev, userMsg, reply]);
+    const thinkingText =
+      locale === "en" ? "Thinking..." : locale === "ja" ? "考えています…" : "생각중...";
+    const thinkingId = makeId("assistant_thinking");
+    const thinkingMsg: ChatMessage = {
+      id: thinkingId,
+      role: "assistant",
+      text: thinkingText,
+      createdAtISO: nowISO(),
+    };
+
+    setMessages((prev) => [...prev, userMsg, thinkingMsg]);
+    setSending(true);
+    try {
+      const replyText = await fetchMentorAdvice({ message: trimmed, locale });
+      const reply: ChatMessage = {
+        id: makeId("assistant"),
+        role: "assistant",
+        text: replyText,
+        createdAtISO: nowISO(),
+      };
+      setMessages((prev) => prev.map((m) => (m.id === thinkingId ? reply : m)));
+    } catch {
+      // 네트워크/서버 실패 시 로컬(휴리스틱) 답변으로 폴백
+      const reply = makeAssistantReply({ userText: trimmed, logs, locale });
+      setMessages((prev) => prev.map((m) => (m.id === thinkingId ? reply : m)));
+    } finally {
+      setSending(false);
+    }
   }
 
   return (
@@ -129,7 +158,7 @@ export function AssistantScreen({ navigation }: Props) {
           />
           <View style={{ width: 10 }} />
           <View style={{ width: 110 }}>
-            <PrimaryButton title={t("send")} onPress={send} />
+            <PrimaryButton title={sending ? (locale === "en" ? "Sending..." : locale === "ja" ? "送信中…" : "전송중...") : t("send")} onPress={send} />
             <View style={{ height: 8 }} />
             <PrimaryButton title={t("btnBack")} variant="secondary" onPress={() => navigation.navigate("Dashboard")} />
           </View>

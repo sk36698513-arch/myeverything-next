@@ -18,7 +18,10 @@ import { RootStackParamList } from "../navigation/types";
 import { Colors } from "../theme/colors";
 import { Spacing } from "../theme/spacing";
 import { addLog, loadLogs } from "../storage/logs";
+import { loadChat, appendChat } from "../storage/chat";
 import type { DailyLog } from "../types";
+import { makeId } from "../lib/id";
+import { fetchMentorAdvice } from "../ai/mentorApi";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Dashboard">;
 
@@ -35,6 +38,10 @@ export function DashboardScreen({ navigation }: Props) {
   const [recentLogs, setRecentLogs] = useState<DailyLog[]>([]);
   const { t, locale } = useI18n();
   const [draft, setDraft] = useState("");
+  const [mentorDraft, setMentorDraft] = useState("");
+  const [mentorReply, setMentorReply] = useState<string | null>(null);
+  const [mentorError, setMentorError] = useState<string | null>(null);
+  const [mentorSending, setMentorSending] = useState(false);
   const [autoPickerOpen, setAutoPickerOpen] = useState(false);
   const [autoStart, setAutoStart] = useState<Date | null>(null);
   const [autoEnd, setAutoEnd] = useState<Date | null>(null);
@@ -66,6 +73,48 @@ export function DashboardScreen({ navigation }: Props) {
     });
   }, [locale]);
   const last = logs[0];
+
+  async function askMentorInline() {
+    if (mentorSending) return;
+    const msg = mentorDraft.trim();
+    if (!msg) {
+      Alert.alert(t("mentorEmptyTitle"), t("mentorEmptyBody"));
+      return;
+    }
+
+    setMentorSending(true);
+    setMentorReply(null);
+    setMentorError(null);
+    try {
+      const replyText = await fetchMentorAdvice({ message: msg, locale });
+      setMentorReply(replyText);
+
+      // 채팅에 저장(Assistant 화면에서도 이어서 보이게)
+      const prev = await loadChat();
+      const now = new Date().toISOString();
+      const next = [
+        ...prev,
+        { id: makeId("user"), role: "user" as const, text: msg, createdAtISO: now },
+        { id: makeId("assistant"), role: "assistant" as const, text: replyText, createdAtISO: new Date().toISOString() },
+      ];
+      await appendChat(next);
+    } catch {
+      const errText =
+        locale === "en"
+          ? "Failed to connect. Please try again in a moment."
+          : locale === "ja"
+            ? "接続に失敗しました。しばらくしてからもう一度お試しください。"
+            : "연결에 실패했어요. 잠시 후 다시 시도해 주세요.";
+      setMentorError(errText);
+      // 웹에서는 Alert가 눈에 안 띌 수 있어, 화면에도 표시함
+      Alert.alert(
+        locale === "en" ? "Failed to connect" : locale === "ja" ? "接続に失敗しました" : "연결에 실패했어요",
+        errText
+      );
+    } finally {
+      setMentorSending(false);
+    }
+  }
 
   async function onSaveInline() {
     if (saving) return;
@@ -248,7 +297,40 @@ export function DashboardScreen({ navigation }: Props) {
             <View />
           </View>
           <View style={styles.hr} />
+          <TextInput
+            value={mentorDraft}
+            onChangeText={(v) => {
+              setMentorDraft(v);
+              if (mentorReply) setMentorReply(null);
+              if (mentorError) setMentorError(null);
+            }}
+            placeholder={t("mentorQuickPlaceholder")}
+            placeholderTextColor="#9AB2C4"
+            style={styles.mentorInput}
+            multiline
+            textAlignVertical="top"
+          />
+
+          {mentorSending ? <Text style={styles.miniHint}>{t("mentorSending")}</Text> : null}
+          {mentorReply ? (
+            <View style={styles.mentorReplyBox}>
+              <Text style={styles.mentorReplyText}>{mentorReply}</Text>
+            </View>
+          ) : null}
+          {mentorError ? (
+            <View style={styles.mentorErrorBox}>
+              <Text style={styles.mentorErrorText}>{mentorError}</Text>
+            </View>
+          ) : null}
+
           <View style={styles.buttonStack}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={askMentorInline}
+              style={({ pressed }) => [styles.bigBtnWide, styles.bigBtnPrimary, { opacity: pressed ? 0.9 : 1 }]}
+            >
+              <Text style={styles.bigBtnText}>{mentorSending ? t("mentorSending") : t("btnAskMentor")}</Text>
+            </Pressable>
             <Pressable
               accessibilityRole="button"
               onPress={() => navigation.navigate("Assistant")}
@@ -511,5 +593,35 @@ const styles = StyleSheet.create({
     backgroundColor: "white",
   },
   clearPillText: { fontSize: 12, fontWeight: "900", color: Colors.mutedText },
+  mentorInput: {
+    minHeight: 86,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    lineHeight: 20,
+    color: Colors.text,
+    backgroundColor: "#FAFCFF",
+  },
+  mentorReplyBox: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: "#F7FBFF",
+  },
+  mentorReplyText: { fontSize: 14, lineHeight: 20, color: Colors.text },
+  mentorErrorBox: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#FCA5A5",
+    backgroundColor: "#FEF2F2",
+  },
+  mentorErrorText: { fontSize: 13, lineHeight: 18, color: "#991B1B", fontWeight: "700" },
 });
 
