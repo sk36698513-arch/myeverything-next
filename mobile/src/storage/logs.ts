@@ -3,6 +3,7 @@ import { makeId } from "../lib/id";
 import { StorageKeys } from "./keys";
 import { getJson, setJson } from "./storage";
 import { analyzeEmotion } from "../ai/emotion";
+import { syncLogToServer } from "./sync";
 
 export async function loadLogs(): Promise<DailyLog[]> {
   const logs = (await getJson<DailyLog[]>(StorageKeys.logs)) ?? [];
@@ -25,6 +26,10 @@ export async function addLog(params: { content: string }): Promise<DailyLog> {
   const existing = (await getJson<DailyLog[]>(StorageKeys.logs)) ?? [];
   const next = [log, ...existing];
   await setJson(StorageKeys.logs, next);
+
+  // 서버 DB에도 저장(best-effort)
+  // 로컬 저장이 우선이며, 업로드 실패해도 앱 사용은 계속됨
+  syncLogToServer(log);
   return log;
 }
 

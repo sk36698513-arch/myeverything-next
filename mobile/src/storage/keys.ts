@@ -3,5 +3,7 @@ export const StorageKeys = {
   logs: "@my-everything/logs",
   chat: "@my-everything/chat",
   locale: "@my-everything/locale",
+  deviceId: "@my-everything/deviceId",
+  mentorQuota: "@my-everything/mentorQuota",
 } as const;
 

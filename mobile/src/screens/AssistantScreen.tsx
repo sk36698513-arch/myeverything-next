@@ -1,12 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   FlatList,
+  InteractionManager,
   KeyboardAvoidingView,
+  LayoutChangeEvent,
   Platform,
   StyleSheet,
   Text,
   TextInput,
   View,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { PrimaryButton } from "../components/PrimaryButton";
@@ -18,7 +22,7 @@ import type { ChatMessage, DailyLog } from "../types";
 import { loadLogs } from "../storage/logs";
 import { loadChat, appendChat } from "../storage/chat";
 import { makeAssistantReply } from "../ai/assistant";
-import { fetchMentorAdvice } from "../ai/mentorApi";
+import { fetchMentorAdvice, isMentorQuotaError } from "../ai/mentorApi";
 import { makeId } from "../lib/id";
 import { useI18n } from "../i18n/i18n";
 
@@ -35,7 +39,55 @@ export function AssistantScreen({ navigation }: Props) {
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
   const listRef = useRef<FlatList<ChatMessage> | null>(null);
+  const [isNearBottom, setIsNearBottom] = useState(true);
+  const forceScrollRef = useRef(false);
+  const pendingScrollRef = useRef(false);
   const { t, locale } = useI18n();
+
+  // 마지막 메시지가 입력창에 가리지 않도록, 입력창 실제 높이만큼만 여백을 둠
+  const [composerHeight, setComposerHeight] = useState(120);
+
+  function scrollToBottom(animated = true) {
+    const list = listRef.current;
+    if (!list) return;
+
+    // FlatList on web can be flaky; retry a few times.
+    const run = (delayMs: number) => {
+      setTimeout(() => {
+        const doScroll = () => {
+          try {
+            list.scrollToEnd({ animated });
+          } catch {
+            // ignore
+          }
+        };
+
+        // RN/web에서 레이아웃 타이밍 이슈가 있어 afterInteractions + RAF로 보강
+        try {
+          InteractionManager.runAfterInteractions(() => {
+            try {
+              requestAnimationFrame(doScroll);
+            } catch {
+              doScroll();
+            }
+          });
+        } catch {
+          doScroll();
+        }
+      }, delayMs);
+    };
+
+    run(0);
+    run(50);
+    run(200);
+  }
+
+  function onListScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
+    const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+    const paddingToBottom = composerHeight + 40; // composer + small buffer
+    const nearBottom = contentOffset.y + layoutMeasurement.height >= contentSize.height - paddingToBottom;
+    setIsNearBottom(nearBottom);
+  }
 
   useEffect(() => {
     loadLogs().then(setLogs);
@@ -67,16 +119,30 @@ export function AssistantScreen({ navigation }: Props) {
   const data = useMemo(() => messages, [messages]);
 
   useEffect(() => {
-    // 새 메시지가 추가될 때 항상 맨 아래로 스크롤
-    const t = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
-    return () => clearTimeout(t);
+    // 새 메시지가 추가될 때: (1) 사용자가 하단 근처면 자동 스크롤, (2) 방금 전송한 경우는 강제 스크롤
+    if (forceScrollRef.current || isNearBottom) {
+      scrollToBottom(true);
+      forceScrollRef.current = false;
+    }
   }, [messages.length]);
+
+  useEffect(() => {
+    // 메시지 "교체"(길이 유지) 케이스까지 커버: 렌더 후 1회 더 보장
+    if (!pendingScrollRef.current) return;
+    pendingScrollRef.current = false;
+    if (forceScrollRef.current || isNearBottom) {
+      scrollToBottom(true);
+      forceScrollRef.current = false;
+    }
+  }, [messages]);
 
   async function send() {
     if (sendingRef.current) return;
     const trimmed = text.trim();
     if (!trimmed) return;
     sendingRef.current = true;
+    forceScrollRef.current = true;
+    pendingScrollRef.current = true;
     setText("");
 
     const userMsg: ChatMessage = {
@@ -98,19 +164,62 @@ export function AssistantScreen({ navigation }: Props) {
 
     setMessages((prev) => [...prev, userMsg, thinkingMsg]);
     setSending(true);
+    scrollToBottom(true);
     try {
-      const replyText = await fetchMentorAdvice({ message: trimmed, locale });
+      const history = messages
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .slice(-5)
+        .map((m) => ({ role: m.role, text: m.text }));
+      const replyText = await fetchMentorAdvice({ message: trimmed, locale, history });
       const reply: ChatMessage = {
         id: makeId("assistant"),
         role: "assistant",
         text: replyText,
         createdAtISO: nowISO(),
       };
+      pendingScrollRef.current = true;
       setMessages((prev) => prev.map((m) => (m.id === thinkingId ? reply : m)));
-    } catch {
+      scrollToBottom(true);
+    } catch (e) {
+      // 토큰/요청 제한: 서버 호출 없이 로컬 질문 모드로 전환
+      if (isMentorQuotaError(e)) {
+        const note =
+          e.code === "mentor_message_too_long"
+            ? locale === "en"
+              ? "Your message is too long, so I’ll switch to offline questions."
+              : locale === "ja"
+                ? "文章が長すぎるため、オフラインの質問モードに切り替えます。"
+                : "내용이 너무 길어서, 오프라인 질문 모드로 전환할게요."
+            : e.code === "mentor_rate_limited"
+              ? locale === "en"
+                ? "Please wait a moment—switching to offline questions."
+                : locale === "ja"
+                  ? "少し待ってください。オフラインの質問モードに切り替えます。"
+                  : "잠시만 기다려주세요. 오프라인 질문 모드로 전환할게요."
+              : locale === "en"
+                ? "You’ve reached today’s AI usage limit. Switching to offline questions."
+                : locale === "ja"
+                  ? "本日のAI利用上限に達しました。オフラインの質問モードに切り替えます。"
+                  : "오늘 AI 사용량 제한에 도달했어요. 오프라인 질문 모드로 전환할게요.";
+
+        const local = makeAssistantReply({ userText: trimmed, logs, locale });
+        const merged: ChatMessage = {
+          ...local,
+          id: makeId("assistant"),
+          createdAtISO: nowISO(),
+          text: `${note}\n\n${local.text}`,
+        };
+        pendingScrollRef.current = true;
+        setMessages((prev) => prev.map((m) => (m.id === thinkingId ? merged : m)));
+        scrollToBottom(true);
+        return;
+      }
+
       // 네트워크/서버 실패 시 로컬(휴리스틱) 답변으로 폴백
       const reply = makeAssistantReply({ userText: trimmed, logs, locale });
+      pendingScrollRef.current = true;
       setMessages((prev) => prev.map((m) => (m.id === thinkingId ? reply : m)));
+      scrollToBottom(true);
     } finally {
       setSending(false);
       sendingRef.current = false;
@@ -136,7 +245,7 @@ export function AssistantScreen({ navigation }: Props) {
             listRef.current = r as any;
           }}
           style={{ flex: 1 }}
-          contentContainerStyle={{ padding: Spacing.lg }}
+          contentContainerStyle={{ padding: Spacing.lg, paddingBottom: Spacing.lg + composerHeight }}
           keyboardShouldPersistTaps="handled"
           data={data}
           keyExtractor={(m) => m.id}
@@ -147,10 +256,21 @@ export function AssistantScreen({ navigation }: Props) {
               </Text>
             </View>
           )}
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+          onScroll={onListScroll}
+          scrollEventThrottle={16}
+          onContentSizeChange={() => {
+            if (forceScrollRef.current || isNearBottom) scrollToBottom(true);
+          }}
         />
 
-        <View style={styles.composer}>
+        <View
+          style={styles.composer}
+          onLayout={(e: LayoutChangeEvent) => {
+            const h = Math.max(90, Math.round(e.nativeEvent.layout.height));
+            // 높이가 실제로 바뀌었을 때만 갱신
+            setComposerHeight((prev) => (Math.abs(prev - h) > 4 ? h : prev));
+          }}
+        >
           <TextInput
             value={text}
             onChangeText={setText}
@@ -158,6 +278,7 @@ export function AssistantScreen({ navigation }: Props) {
             placeholderTextColor="#8AA4B8"
             style={styles.input}
             multiline
+            onFocus={() => scrollToBottom(true)}
           />
           <View style={{ width: 10 }} />
           <View style={{ width: 110 }}>

@@ -22,6 +22,8 @@ import { loadChat, appendChat } from "../storage/chat";
 import type { DailyLog } from "../types";
 import { makeId } from "../lib/id";
 import { fetchMentorAdvice } from "../ai/mentorApi";
+import { isMentorQuotaError } from "../ai/mentorApi";
+import { makeAssistantReply } from "../ai/assistant";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Dashboard">;
 
@@ -88,7 +90,11 @@ export function DashboardScreen({ navigation }: Props) {
     setMentorReply(null);
     setMentorError(null);
     try {
-      const replyText = await fetchMentorAdvice({ message: msg, locale });
+      const history = (await loadChat())
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .slice(-5)
+        .map((m) => ({ role: m.role, text: m.text }));
+      const replyText = await fetchMentorAdvice({ message: msg, locale, history });
       setMentorReply(replyText);
 
       // 채팅에 저장(Assistant 화면에서도 이어서 보이게)
@@ -100,7 +106,35 @@ export function DashboardScreen({ navigation }: Props) {
         { id: makeId("assistant"), role: "assistant" as const, text: replyText, createdAtISO: new Date().toISOString() },
       ];
       await appendChat(next);
-    } catch {
+    } catch (e) {
+      // 토큰/요청 제한: 서버 호출 없이 로컬 질문 모드로 답변
+      if (isMentorQuotaError(e)) {
+        const note =
+          e.code === "mentor_message_too_long"
+            ? locale === "en"
+              ? "Your message is too long, so I’ll switch to offline questions."
+              : locale === "ja"
+                ? "文章が長すぎるため、オフラインの質問モードに切り替えます。"
+                : "내용이 너무 길어서, 오프라인 질문 모드로 전환할게요."
+            : e.code === "mentor_rate_limited"
+              ? locale === "en"
+                ? "Please wait a moment—switching to offline questions."
+                : locale === "ja"
+                  ? "少し待ってください。オフラインの質問モードに切り替えます。"
+                  : "잠시만 기다려주세요. 오프라인 질문 모드로 전환할게요."
+              : locale === "en"
+                ? "You’ve reached today’s AI usage limit. Switching to offline questions."
+                : locale === "ja"
+                  ? "本日のAI利用上限に達しました。オフラインの質問モードに切り替えます。"
+                  : "오늘 AI 사용량 제한에 도달했어요. 오프라인 질문 모드로 전환할게요.";
+
+        const local = makeAssistantReply({ userText: msg, logs, locale });
+        const replyText = `${note}\n\n${local.text}`;
+        setMentorReply(replyText);
+        setMentorError(null);
+        return;
+      }
+
       const errText =
         locale === "en"
           ? "Failed to connect. Please try again in a moment."

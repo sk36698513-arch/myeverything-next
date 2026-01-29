@@ -27,10 +27,13 @@ jobs:
       - name: Deploy via SSH
         run: |
           ssh -o StrictHostKeyChecking=yes -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" << 'EOF'
-            set -e
+            set -euo pipefail
             cd "${{ secrets.DEPLOY_PATH }}"
-            git pull origin main
-            npm install
-            npm run build
-            pm2 restart all || pm2 start npm --name myeverything-next -- start
+
+            # Use repo deploy script (includes PM2 + optional nginx proxy)
+            export PM2_APP_NAME="myeverything-next"
+            export PORT="3000"
+            export APPLY_NGINX_SYNC_PROXY="1"
+
+            bash scripts/deploy-prod.sh
           EOF

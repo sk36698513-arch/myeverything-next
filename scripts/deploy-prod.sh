@@ -32,6 +32,13 @@ else
 fi
 pm2 save
 
+if [[ "${APPLY_NGINX_SYNC_PROXY:-0}" == "1" ]]; then
+  echo "== Nginx: proxy /sync/ to Next.js =="
+  bash "$ROOT_DIR/scripts/server/apply-nginx-sync-proxy.sh"
+else
+  echo "Skip: nginx /sync/ proxy (set APPLY_NGINX_SYNC_PROXY=1 to enable)"
+fi
+
 echo "== Expo web export (static) =="
 if [[ -d "$ROOT_DIR/mobile" && -f "$ROOT_DIR/mobile/package.json" ]]; then
   pushd "$ROOT_DIR/mobile" >/dev/null

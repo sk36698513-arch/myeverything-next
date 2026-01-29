@@ -1,4 +1,5 @@
 import type { Locale } from "../i18n/translations";
+import { consumeMentorQuota, MentorQuotaError } from "../storage/mentorQuota";
 
 // Primary: 새 ChatGPT 엔드포인트(추가 예정)
 const MENTOR_API_URL_PRIMARY = "https://myeverything.kr/api/mentor/advise-gpt";
@@ -15,6 +16,35 @@ function hintLine(locale: Locale) {
 
 function withLanguageHint(locale: Locale, message: string) {
   return `${hintLine(locale)}\n\n${message}`;
+}
+
+type MentorHistoryItem = { role: "user" | "assistant"; text: string };
+
+function buildQuestion(params: { locale: Locale; message: string; history?: MentorHistoryItem[] }) {
+  const { locale, message, history } = params;
+  const msg = message.trim();
+  const tail = (history ?? [])
+    .filter((h) => h && (h.role === "user" || h.role === "assistant") && typeof h.text === "string")
+    .map((h) => ({ role: h.role, text: h.text.trim() }))
+    .filter((h) => h.text.length > 0)
+    .slice(-5); // 최근 5개만 전송
+
+  const shortStyleHint =
+    locale === "en"
+      ? "Keep the answer short. Use bullet points. Do not repeat my message."
+      : locale === "ja"
+        ? "短めに、箇条書きで。入力文を繰り返さないでください。"
+        : "답변은 짧게, 불릿으로. 내 문장을 그대로 반복하지 마.";
+
+  if (tail.length === 0) {
+    return `${hintLine(locale)}\n${shortStyleHint}\n\n${msg}`;
+  }
+
+  const ctx = tail
+    .map((h) => `${h.role === "user" ? "User" : "Assistant"}: ${h.text.replaceAll("\n", " ").slice(0, 600)}`)
+    .join("\n");
+
+  return `${hintLine(locale)}\n${shortStyleHint}\n\n[Recent conversation (last 5)]\n${ctx}\n\n[Now]\n${msg}`;
 }
 
 function cleanMentorReply(params: { raw: string; originalMessage: string; locale: Locale }) {
@@ -52,8 +82,19 @@ function cleanMentorReply(params: { raw: string; originalMessage: string; locale
   return t;
 }
 
-export async function fetchMentorAdvice(params: { message: string; locale: Locale; timeoutMs?: number }) {
-  const { message, locale, timeoutMs = 20000 } = params;
+export async function fetchMentorAdvice(params: {
+  message: string;
+  locale: Locale;
+  timeoutMs?: number;
+  history?: MentorHistoryItem[];
+}) {
+  const { message, locale, timeoutMs = 20000, history } = params;
+
+  // 토큰/요청 제한(앱에서 1차 방어)
+  // - 입력 길이 제한
+  // - 일일 요청 횟수/토큰 예산
+  // - 짧은 연속 클릭(도배) 방지
+  await consumeMentorQuota({ message });
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -64,7 +105,12 @@ export async function fetchMentorAdvice(params: { message: string; locale: Local
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json" },
         // NOTE: backend expects `question` (not `message`)
-        body: JSON.stringify({ question: withLanguageHint(locale, message) }),
+        // - 대화 히스토리는 최근 5개만 포함
+        // - 서버가 지원하면 max_output_tokens 로 "짧게" 고정
+        body: JSON.stringify({
+          question: buildQuestion({ locale, message, history }),
+          max_output_tokens: 220,
+        }),
         signal: controller.signal,
       });
 
@@ -106,3 +152,6 @@ export async function fetchMentorAdvice(params: { message: string; locale: Local
   }
 }
 
+export function isMentorQuotaError(e: unknown): e is MentorQuotaError {
+  return typeof e === "object" && !!e && "code" in (e as any);
+}
