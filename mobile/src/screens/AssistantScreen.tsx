@@ -25,6 +25,7 @@ import { makeAssistantReply } from "../ai/assistant";
 import { fetchMentorAdvice, isMentorQuotaError } from "../ai/mentorApi";
 import { makeId } from "../lib/id";
 import { useI18n } from "../i18n/i18n";
+import { getMentorQuotaStatus } from "../storage/mentorQuota";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Assistant">;
 
@@ -43,6 +44,7 @@ export function AssistantScreen({ navigation }: Props) {
   const forceScrollRef = useRef(false);
   const pendingScrollRef = useRef(false);
   const { t, locale } = useI18n();
+  const [quotaHint, setQuotaHint] = useState<string | null>(null);
 
   // 마지막 메시지가 입력창에 가리지 않도록, 입력창 실제 높이만큼만 여백을 둠
   const [composerHeight, setComposerHeight] = useState(120);
@@ -91,6 +93,26 @@ export function AssistantScreen({ navigation }: Props) {
 
   useEffect(() => {
     loadLogs().then(setLogs);
+    getMentorQuotaStatus()
+      .then((s) => {
+        const sec = Math.ceil((s.nextAllowedInMs ?? 0) / 1000);
+        const base =
+          locale === "en"
+            ? `Server AI: ${s.usedRequests}/${s.maxRequests} used · ${s.remainingRequests} left`
+            : locale === "ja"
+              ? `サーバーAI: ${s.usedRequests}/${s.maxRequests} 回使用 · 残り ${s.remainingRequests} 回`
+              : `서버 AI: ${s.usedRequests}/${s.maxRequests}회 사용 · 남은 ${s.remainingRequests}회`;
+        const cool =
+          sec > 0
+            ? locale === "en"
+              ? ` · next in ${sec}s`
+              : locale === "ja"
+                ? ` · ${sec}秒後に可能`
+                : ` · ${sec}초 후 가능`
+            : "";
+        setQuotaHint(base + cool);
+      })
+      .catch(() => setQuotaHint(null));
     loadChat().then((m) => {
       if (m.length > 0) setMessages(m);
       else {
@@ -186,21 +208,21 @@ export function AssistantScreen({ navigation }: Props) {
         const note =
           e.code === "mentor_message_too_long"
             ? locale === "en"
-              ? "Your message is too long, so I’ll switch to offline questions."
+              ? "Server AI call skipped (message too long). Using offline mode."
               : locale === "ja"
-                ? "文章が長すぎるため、オフラインの質問モードに切り替えます。"
-                : "내용이 너무 길어서, 오프라인 질문 모드로 전환할게요."
+                ? "サーバーAI呼び出しをスキップ（文章が長すぎます）。オフラインに切り替えます。"
+                : "서버 AI 호출 생략(메시지 과다). 오프라인으로 처리합니다."
             : e.code === "mentor_rate_limited"
               ? locale === "en"
-                ? "Please wait a moment—switching to offline questions."
+                ? "Server AI call skipped (cooldown). Using offline mode."
                 : locale === "ja"
-                  ? "少し待ってください。オフラインの質問モードに切り替えます。"
-                  : "잠시만 기다려주세요. 오프라인 질문 모드로 전환할게요."
+                  ? "サーバーAI呼び出しをスキップ（クールダウン中）。オフラインに切り替えます。"
+                  : "서버 AI 호출 생략(쿨다운). 오프라인으로 처리합니다."
               : locale === "en"
-                ? "You’ve reached today’s AI usage limit. Switching to offline questions."
+                ? "Server AI call skipped (daily limit). Using offline mode."
                 : locale === "ja"
-                  ? "本日のAI利用上限に達しました。オフラインの質問モードに切り替えます。"
-                  : "오늘 AI 사용량 제한에 도달했어요. 오프라인 질문 모드로 전환할게요.";
+                  ? "サーバーAI呼び出しをスキップ（本日の上限）。オフラインに切り替えます。"
+                  : "서버 AI 호출 생략(일일 제한). 오프라인으로 처리합니다.";
 
         const local = makeAssistantReply({ userText: trimmed, logs, locale });
         const merged: ChatMessage = {
@@ -223,6 +245,26 @@ export function AssistantScreen({ navigation }: Props) {
     } finally {
       setSending(false);
       sendingRef.current = false;
+      getMentorQuotaStatus()
+        .then((s) => {
+          const sec = Math.ceil((s.nextAllowedInMs ?? 0) / 1000);
+          const base =
+            locale === "en"
+              ? `Server AI: ${s.usedRequests}/${s.maxRequests} used · ${s.remainingRequests} left`
+              : locale === "ja"
+                ? `サーバーAI: ${s.usedRequests}/${s.maxRequests} 回使用 · 残り ${s.remainingRequests} 回`
+                : `서버 AI: ${s.usedRequests}/${s.maxRequests}회 사용 · 남은 ${s.remainingRequests}회`;
+          const cool =
+            sec > 0
+              ? locale === "en"
+                ? ` · next in ${sec}s`
+                : locale === "ja"
+                  ? ` · ${sec}秒後に可能`
+                  : ` · ${sec}초 후 가능`
+              : "";
+          setQuotaHint(base + cool);
+        })
+        .catch(() => setQuotaHint(null));
     }
   }
 
@@ -236,6 +278,7 @@ export function AssistantScreen({ navigation }: Props) {
         <View style={styles.header}>
           <Text style={styles.title}>{t("assistantTitle")}</Text>
           <Text style={styles.subtitle}>{t("assistantSubtitle")}</Text>
+          {quotaHint ? <Text style={styles.quotaHint}>{quotaHint}</Text> : null}
         </View>
 
         <FlatList
@@ -296,6 +339,7 @@ const styles = StyleSheet.create({
   header: { paddingTop: Spacing.xl, paddingHorizontal: Spacing.lg, paddingBottom: Spacing.sm },
   title: { fontSize: 26, fontWeight: "900", color: Colors.primary },
   subtitle: { marginTop: 6, fontSize: 13, lineHeight: 18, color: Colors.mutedText },
+  quotaHint: { marginTop: 8, fontSize: 12, lineHeight: 16, color: Colors.mutedText },
   bubble: {
     maxWidth: "90%",
     borderRadius: 16,

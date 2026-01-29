@@ -8,6 +8,19 @@ type MentorQuotaState = {
   lastAtMs: number;
 };
 
+export const MentorQuotaLimits = {
+  // 요구사항(최소 구현)
+  dailyMaxRequests: 5,
+  cooldownMs: 60000,
+
+  // 안전 장치
+  maxMessageChars: 1200,
+
+  // 비용 추정용(서버에서 max_output_tokens를 낮춘다는 가정)
+  expectedOutputTokens: 220,
+  dailyMaxTokens: 9000,
+} as const;
+
 function dayKey(d = new Date()) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -30,6 +43,42 @@ export class MentorQuotaError extends Error {
   }
 }
 
+export async function getMentorQuotaStatus() {
+  const now = Date.now();
+  const today = dayKey();
+  const existing = (await getJson<MentorQuotaState>(StorageKeys.mentorQuota)) ?? {
+    day: today,
+    reqCount: 0,
+    tokenCount: 0,
+    lastAtMs: 0,
+  };
+
+  const state: MentorQuotaState =
+    existing.day === today
+      ? existing
+      : {
+          day: today,
+          reqCount: 0,
+          tokenCount: 0,
+          lastAtMs: 0,
+        };
+
+  const nextAllowedInMs =
+    state.lastAtMs && now - state.lastAtMs < MentorQuotaLimits.cooldownMs
+      ? MentorQuotaLimits.cooldownMs - (now - state.lastAtMs)
+      : 0;
+
+  return {
+    day: state.day,
+    usedRequests: state.reqCount,
+    maxRequests: MentorQuotaLimits.dailyMaxRequests,
+    remainingRequests: Math.max(0, MentorQuotaLimits.dailyMaxRequests - state.reqCount),
+    nextAllowedInMs,
+    usedTokens: state.tokenCount,
+    maxTokens: MentorQuotaLimits.dailyMaxTokens,
+  };
+}
+
 export async function consumeMentorQuota(params: {
   message: string;
   // 응답 토큰은 서버 설정/모델에 따라 달라질 수 있어 보수적으로 잡음
@@ -42,12 +91,12 @@ export async function consumeMentorQuota(params: {
   const {
     message,
     // "짧게" 고정(서버 max_output_tokens를 낮추는 것을 가정한 보수 추정치)
-    expectedOutputTokens = 220,
-    maxMessageChars = 1200,
+    expectedOutputTokens = MentorQuotaLimits.expectedOutputTokens,
+    maxMessageChars = MentorQuotaLimits.maxMessageChars,
     // 요구사항: 일일 질문 5회 제한 + 쿨다운 60초
-    dailyMaxRequests = 5,
-    dailyMaxTokens = 9000,
-    minIntervalMs = 60000,
+    dailyMaxRequests = MentorQuotaLimits.dailyMaxRequests,
+    dailyMaxTokens = MentorQuotaLimits.dailyMaxTokens,
+    minIntervalMs = MentorQuotaLimits.cooldownMs,
   } = params;
 
   const msg = message.trim();
@@ -79,7 +128,10 @@ export async function consumeMentorQuota(params: {
         };
 
   if (state.lastAtMs && now - state.lastAtMs < minIntervalMs) {
-    throw new MentorQuotaError("mentor_rate_limited", "mentor_rate_limited");
+    throw new MentorQuotaError("mentor_rate_limited", "mentor_rate_limited", {
+      limit: minIntervalMs,
+      used: now - state.lastAtMs,
+    });
   }
 
   const inTok = estimateTokens(msg);
