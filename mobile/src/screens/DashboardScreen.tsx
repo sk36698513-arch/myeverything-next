@@ -46,6 +46,7 @@ export function DashboardScreen({ navigation }: Props) {
   const [mentorError, setMentorError] = useState<string | null>(null);
   const [mentorSending, setMentorSending] = useState(false);
   const mentorSendingRef = useRef(false);
+  const mentorSendTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [mentorQuotaHint, setMentorQuotaHint] = useState<string | null>(null);
   const [autoPickerOpen, setAutoPickerOpen] = useState(false);
   const [autoStart, setAutoStart] = useState<Date | null>(null);
@@ -58,6 +59,7 @@ export function DashboardScreen({ navigation }: Props) {
   useEffect(() => {
     return () => {
       if (savedNoticeTimerRef.current) clearTimeout(savedNoticeTimerRef.current);
+      if (mentorSendTimeoutRef.current) clearTimeout(mentorSendTimeoutRef.current);
     };
   }, []);
 
@@ -101,7 +103,17 @@ export function DashboardScreen({ navigation }: Props) {
   const last = logs[0];
 
   async function askMentorInline() {
-    if (mentorSendingRef.current) return;
+    if (mentorSendingRef.current) {
+      Alert.alert(
+        locale === "en" ? "In progress" : locale === "ja" ? "処理中" : "처리 중",
+        locale === "en"
+          ? "Please wait a moment."
+          : locale === "ja"
+            ? "少しお待ちください。"
+            : "잠시만 기다려주세요."
+      );
+      return;
+    }
     const msg = mentorDraft.trim();
     if (!msg) {
       Alert.alert(t("mentorEmptyTitle"), t("mentorEmptyBody"));
@@ -112,6 +124,21 @@ export function DashboardScreen({ navigation }: Props) {
     setMentorSending(true);
     setMentorReply(null);
     setMentorError(null);
+
+    // failsafe: if something goes wrong, re-enable the button
+    if (mentorSendTimeoutRef.current) clearTimeout(mentorSendTimeoutRef.current);
+    mentorSendTimeoutRef.current = setTimeout(() => {
+      mentorSendingRef.current = false;
+      setMentorSending(false);
+      setMentorError(
+        locale === "en"
+          ? "Timeout. Please try again."
+          : locale === "ja"
+            ? "タイムアウトしました。もう一度お試しください。"
+            : "시간 초과. 다시 시도해 주세요."
+      );
+    }, 25000);
+
     try {
       const history = (await loadChat())
         .filter((m) => m.role === "user" || m.role === "assistant")
@@ -151,8 +178,18 @@ export function DashboardScreen({ navigation }: Props) {
                   ? "サーバーAI呼び出しをスキップ（本日の上限）。オフラインに切り替えます。"
                   : "서버 AI 호출 생략(일일 제한). 오프라인으로 처리합니다.";
 
-        const local = makeAssistantReply({ userText: msg, logs, locale });
-        const replyText = `${note}\n\n${local.text}`;
+        const local = makeAssistantReply({
+          userText: msg,
+          logs,
+          locale,
+          offlineReason:
+            e.code === "mentor_message_too_long"
+              ? "message_too_long"
+              : e.code === "mentor_rate_limited"
+                ? "cooldown"
+                : "daily_limit",
+        });
+        const replyText = local.text;
         setMentorReply(replyText);
         setMentorError(null);
         return;
@@ -173,6 +210,10 @@ export function DashboardScreen({ navigation }: Props) {
     } finally {
       setMentorSending(false);
       mentorSendingRef.current = false;
+      if (mentorSendTimeoutRef.current) {
+        clearTimeout(mentorSendTimeoutRef.current);
+        mentorSendTimeoutRef.current = null;
+      }
       // 사용량 힌트 갱신
       getMentorQuotaStatus()
         .then((s) => {

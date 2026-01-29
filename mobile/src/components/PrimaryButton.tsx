@@ -7,10 +7,12 @@ export function PrimaryButton(props: {
   title: string;
   onPress: () => void;
   variant?: "primary" | "secondary" | "danger";
+  size?: "md" | "sm";
   style?: ViewStyle;
   disabled?: boolean;
 }) {
   const variant = props.variant ?? "primary";
+  const size = props.size ?? "md";
   const bg =
     variant === "danger"
       ? Colors.danger
@@ -25,11 +27,12 @@ export function PrimaryButton(props: {
       onPress={props.onPress}
       style={({ pressed }) => [
         styles.btn,
+        size === "sm" ? styles.btnSm : null,
         { backgroundColor: bg, opacity: props.disabled ? 0.5 : pressed ? 0.9 : 1 },
         props.style,
       ]}
     >
-      <Text style={styles.text}>{props.title}</Text>
+      <Text style={[styles.text, size === "sm" ? styles.textSm : null]}>{props.title}</Text>
     </Pressable>
   );
 }
@@ -43,11 +46,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  btnSm: {
+    paddingVertical: 9,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: 12,
+  },
   text: {
     color: "white",
     fontSize: 16,
     fontWeight: "700",
     letterSpacing: 0.2,
+  },
+  textSm: {
+    fontSize: 13,
   },
 });
 

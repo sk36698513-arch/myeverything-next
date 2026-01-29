@@ -224,12 +224,23 @@ export function AssistantScreen({ navigation }: Props) {
                   ? "サーバーAI呼び出しをスキップ（本日の上限）。オフラインに切り替えます。"
                   : "서버 AI 호출 생략(일일 제한). 오프라인으로 처리합니다.";
 
-        const local = makeAssistantReply({ userText: trimmed, logs, locale });
+        const local = makeAssistantReply({
+          userText: trimmed,
+          logs,
+          locale,
+          offlineReason:
+            e.code === "mentor_message_too_long"
+              ? "message_too_long"
+              : e.code === "mentor_rate_limited"
+                ? "cooldown"
+                : "daily_limit",
+        });
         const merged: ChatMessage = {
           ...local,
           id: makeId("assistant"),
           createdAtISO: nowISO(),
-          text: `${note}\n\n${local.text}`,
+          // note는 중복/반복을 만들기 쉬워서, local 텍스트에 reason으로 포함시킴
+          text: local.text,
         };
         pendingScrollRef.current = true;
         setMessages((prev) => prev.map((m) => (m.id === thinkingId ? merged : m)));
@@ -324,10 +335,19 @@ export function AssistantScreen({ navigation }: Props) {
             onFocus={() => scrollToBottom(true)}
           />
           <View style={{ width: 10 }} />
-          <View style={{ width: 110 }}>
-            <PrimaryButton title={sending ? (locale === "en" ? "Sending..." : locale === "ja" ? "送信中…" : "전송중...") : t("send")} onPress={send} />
+          <View style={{ width: 96 }}>
+            <PrimaryButton
+              size="sm"
+              title={sending ? (locale === "en" ? "Sending..." : locale === "ja" ? "送信中…" : "전송중...") : t("send")}
+              onPress={send}
+            />
             <View style={{ height: 8 }} />
-            <PrimaryButton title={t("btnBack")} variant="secondary" onPress={() => navigation.navigate("Dashboard")} />
+            <PrimaryButton
+              size="sm"
+              title={t("btnBack")}
+              variant="secondary"
+              onPress={() => navigation.navigate("Dashboard")}
+            />
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -336,8 +356,8 @@ export function AssistantScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  header: { paddingTop: Spacing.xl, paddingHorizontal: Spacing.lg, paddingBottom: Spacing.sm },
-  title: { fontSize: 26, fontWeight: "900", color: Colors.primary },
+  header: { paddingTop: Spacing.lg, paddingHorizontal: Spacing.lg, paddingBottom: Spacing.sm },
+  title: { fontSize: 24, fontWeight: "900", color: Colors.primary },
   subtitle: { marginTop: 6, fontSize: 13, lineHeight: 18, color: Colors.mutedText },
   quotaHint: { marginTop: 8, fontSize: 12, lineHeight: 16, color: Colors.mutedText },
   bubble: {
@@ -349,11 +369,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  userBubble: { alignSelf: "flex-end", backgroundColor: Colors.primary },
-  assistantBubble: { alignSelf: "flex-start", backgroundColor: Colors.card },
+  // 사용자(질문)=흰색, AI(답변)=파란색
+  userBubble: { alignSelf: "flex-end", backgroundColor: Colors.card, borderColor: Colors.border },
+  assistantBubble: { alignSelf: "flex-start", backgroundColor: Colors.primary, borderColor: Colors.primary },
   bubbleText: { fontSize: 14, lineHeight: 20 },
-  userText: { color: "white" },
-  assistantText: { color: Colors.text },
+  userText: { color: Colors.text },
+  assistantText: { color: "white" },
   composer: {
     padding: Spacing.lg,
     flexDirection: "row",
