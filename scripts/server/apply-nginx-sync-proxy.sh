@@ -3,6 +3,8 @@ set -euo pipefail
 
 DOMAIN="${DOMAIN:-myeverything.kr}"
 UPSTREAM="${UPSTREAM:-http://127.0.0.1:3000}"
+# Optional override: explicitly choose nginx config file to edit
+TARGET_FILE_OVERRIDE="${TARGET_FILE:-}"
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || { echo "missing command: $1" >&2; exit 1; }
@@ -24,31 +26,101 @@ if [[ -z "$NGINX_T_OUT" ]]; then
 fi
 
 TARGET_FILE="$(
+  # If caller explicitly provides TARGET_FILE, honor it.
+  if [[ -n "$TARGET_FILE_OVERRIDE" ]]; then
+    printf "%s" "$TARGET_FILE_OVERRIDE"
+    exit 0
+  fi
+
   NGINX_T_OUT="$NGINX_T_OUT" DOMAIN="$DOMAIN" python3 - <<'PY'
 import os, re
 
 domain = (os.environ.get("DOMAIN") or "").strip()
 text = (os.environ.get("NGINX_T_OUT") or "").splitlines()
 
-cur = None
-hit = None
+cur_file = None
+files = {}  # file -> [lines]
 for line in text:
   m = re.match(r"^\s*#\s*configuration file\s+(.+?):\s*$", line)
   if m:
-    cur = m.group(1).strip()
+    cur_file = m.group(1).strip()
+    files.setdefault(cur_file, [])
     continue
-  if cur and ("server_name" in line) and domain and (domain in line):
-    hit = cur
-    break
+  if cur_file is not None:
+    files[cur_file].append(line)
 
-if not hit and domain:
-  # fallback: sites-enabled/*.conf often includes domain in path
-  for line in text:
-    if line.strip().startswith("# configuration file") and (domain in line):
-      hit = line.split("configuration file", 1)[1].split(":", 1)[0].strip()
+def find_server_blocks(lines):
+  blocks = []
+  i = 0
+  while i < len(lines):
+    if re.search(r"^\s*server\s*\{", lines[i]):
+      start = i
+      depth = 0
+      j = i
+      while j < len(lines):
+        depth += lines[j].count("{")
+        depth -= lines[j].count("}")
+        if depth == 0 and j > start:
+          blocks.append((start, j, lines[start:j+1]))
+          break
+        j += 1
+      i = j + 1
+      continue
+    i += 1
+  return blocks
+
+def block_has_domain(block_lines):
+  if not domain:
+    return False
+  block = "\n".join(block_lines)
+  return re.search(r"^\s*server_name\s+[^;]*\b" + re.escape(domain) + r"\b", block, re.M) is not None
+
+def block_is_https(block_lines):
+  # Heuristic: listen 443 (optionally with ssl/http2) within the same server block
+  block = "\n".join(block_lines)
+  return re.search(r"^\s*listen\s+443\b", block, re.M) is not None
+
+candidates = []  # (rank, file)
+for path, flines in files.items():
+  blocks = find_server_blocks(flines)
+  has_domain = False
+  has_https = False
+  for _, _, b in blocks:
+    if block_has_domain(b):
+      has_domain = True
+      if block_is_https(b):
+        has_https = True
+        break
+  if has_domain and has_https:
+    candidates.append((0, path))  # best: https server block for domain
+  elif has_domain:
+    candidates.append((1, path))  # fallback: any server block for domain
+
+# deterministic: keep nginx -T order by scanning text again for file markers
+ordered = []
+seen = set()
+for line in text:
+  m = re.match(r"^\s*#\s*configuration file\s+(.+?):\s*$", line)
+  if m:
+    p = m.group(1).strip()
+    if p not in seen:
+      ordered.append(p)
+      seen.add(p)
+
+best = None
+if candidates:
+  rank_by_path = {p: r for (r, p) in candidates}
+  # choose lowest rank; if tie, first in nginx -T order
+  best_rank = min(r for (r, _) in candidates)
+  for p in ordered:
+    if rank_by_path.get(p) == best_rank:
+      best = p
       break
+  if best is None:
+    # fallback
+    best = sorted(candidates, key=lambda x: (x[0], x[1]))[0][1]
 
-print(hit or "")
+print(best or "")
 PY
 )"
 
