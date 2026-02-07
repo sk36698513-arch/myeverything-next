@@ -33,7 +33,9 @@ jobs:
             # Use repo deploy script (includes PM2 + optional nginx proxy)
             export PM2_APP_NAME="myeverything-next"
             export PORT="3000"
-            export APPLY_NGINX_SYNC_PROXY="1"
+            # nginx 설정 자동수정은 서버 권한/환경에 따라 실패할 수 있어 기본은 끔
+            # 필요하면 서버에서 직접 적용하거나, 아래 변수를 "1"로 다시 켜세요.
+            export APPLY_NGINX_SYNC_PROXY="0"
 
             bash scripts/deploy-prod.sh
           EOF
