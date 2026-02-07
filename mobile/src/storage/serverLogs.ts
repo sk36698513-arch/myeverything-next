@@ -13,7 +13,8 @@ export async function fetchServerLogs(params: {
   const limit = Math.min(Math.max(params.limit ?? 5000, 1), 5000);
   const timeoutMs = Math.min(Math.max(params.timeoutMs ?? 15000, 2000), 30000);
 
-  const url = new URL(`${base}/sync/logs/`);
+  // trailing slash로 인한 308(Location) 리다이렉트 방지
+  const url = new URL(`${base}/sync/logs`);
   url.searchParams.set("deviceId", deviceId);
   url.searchParams.set("limit", String(limit));
   if (params.startISO) url.searchParams.set("startISO", params.startISO);

@@ -10,7 +10,8 @@ export async function syncLogToServer(log: DailyLog): Promise<void> {
   const timer = setTimeout(() => controller.abort(), 15000);
 
   try {
-    await fetch(`${base}/sync/logs/`, {
+    // trailing slash로 인한 308(Location) 리다이렉트 방지
+    await fetch(`${base}/sync/logs`, {
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json" },
       body: JSON.stringify({ deviceId, log }),

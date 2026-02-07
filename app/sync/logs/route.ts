@@ -23,25 +23,48 @@ function dataPath(...parts: string[]) {
   return path.join(process.cwd(), "data", ...parts);
 }
 
-function ok(json: unknown, status = 200) {
-  return NextResponse.json(json, { status });
+function corsHeaders(req: Request) {
+  const origin = req.headers.get("origin") ?? "";
+  const allow = new Set([
+    "http://localhost:8081",
+    "http://localhost:3000",
+    "http://127.0.0.1:8081",
+    "http://127.0.0.1:3000",
+    "https://myeverything.kr",
+  ]);
+  const h: Record<string, string> = {
+    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-headers": "content-type,accept",
+    "access-control-allow-credentials": "true",
+  };
+  if (allow.has(origin)) h["access-control-allow-origin"] = origin;
+  return h;
+}
+
+function ok(json: unknown, status = 200, headers?: Record<string, string>) {
+  return NextResponse.json(json, { status, headers });
 }
 
 function clamp(n: number, min: number, max: number) {
   return Math.min(Math.max(n, min), max);
 }
 
+export async function OPTIONS(req: Request) {
+  return new NextResponse(null, { status: 204, headers: corsHeaders(req) });
+}
+
 export async function POST(req: Request) {
+  const headers = corsHeaders(req);
   try {
     const body = (await req.json().catch(() => null)) as null | { deviceId?: unknown; log?: unknown };
     const deviceId = typeof body?.deviceId === "string" ? body.deviceId.trim() : "";
     const log = body?.log as DailyLog | undefined;
 
-    if (!deviceId) return ok({ ok: false, message: "deviceId required" }, 400);
-    if (!log || typeof log !== "object") return ok({ ok: false, message: "log required" }, 400);
-    if (typeof log.id !== "string" || !log.id) return ok({ ok: false, message: "log.id required" }, 400);
-    if (typeof log.createdAtISO !== "string" || !log.createdAtISO) return ok({ ok: false, message: "log.createdAtISO required" }, 400);
-    if (typeof log.content !== "string" || !log.content.trim()) return ok({ ok: false, message: "log.content required" }, 400);
+    if (!deviceId) return ok({ ok: false, message: "deviceId required" }, 400, headers);
+    if (!log || typeof log !== "object") return ok({ ok: false, message: "log required" }, 400, headers);
+    if (typeof log.id !== "string" || !log.id) return ok({ ok: false, message: "log.id required" }, 400, headers);
+    if (typeof log.createdAtISO !== "string" || !log.createdAtISO) return ok({ ok: false, message: "log.createdAtISO required" }, 400, headers);
+    if (typeof log.content !== "string" || !log.content.trim()) return ok({ ok: false, message: "log.content required" }, 400, headers);
 
     const dir = dataPath("logs");
     await mkdir(dir, { recursive: true });
@@ -55,13 +78,14 @@ export async function POST(req: Request) {
 
     // JSONL append (file DB)
     await appendFile(dataPath("logs", "logs.jsonl"), `${JSON.stringify(row)}\n`, "utf8");
-    return ok({ ok: true });
+    return ok({ ok: true }, 200, headers);
   } catch (e) {
-    return ok({ ok: false, message: "server_error" }, 500);
+    return ok({ ok: false, message: "server_error" }, 500, headers);
   }
 }
 
 export async function GET(req: Request) {
+  const headers = corsHeaders(req);
   const url = new URL(req.url);
   const deviceId = (url.searchParams.get("deviceId") ?? "").trim();
   const startISO = url.searchParams.get("startISO");
@@ -101,7 +125,7 @@ export async function GET(req: Request) {
       }
 
       out.sort((x, y) => (x.createdAtISO < y.createdAtISO ? 1 : -1));
-      return ok({ ok: true, logs: out.slice(0, limit) });
+      return ok({ ok: true, logs: out.slice(0, limit) }, 200, headers);
     }
 
     // Debug mode: 최근 N줄 보기
@@ -112,10 +136,10 @@ export async function GET(req: Request) {
         return { raw: l };
       }
     });
-    return ok({ ok: true, count: lines.length, tail });
+    return ok({ ok: true, count: lines.length, tail }, 200, headers);
   } catch {
-    if (deviceId) return ok({ ok: true, logs: [] });
-    return ok({ ok: true, count: 0, tail: [] });
+    if (deviceId) return ok({ ok: true, logs: [] }, 200, headers);
+    return ok({ ok: true, count: 0, tail: [] }, 200, headers);
   }
 }
 

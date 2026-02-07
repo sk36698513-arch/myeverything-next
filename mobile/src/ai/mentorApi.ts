@@ -1,9 +1,15 @@
 import type { Locale } from "../i18n/translations";
 import { consumeMentorQuota, MentorQuotaError } from "../storage/mentorQuota";
+import { getApiBase } from "../lib/apiBase";
 
 // Primary: Next.js(sync)에서 직접 ChatGPT 생성
-// - Nginx가 /sync/ 를 Next.js(3000)로 프록시하면 동작
-const MENTOR_API_URL_PRIMARY = "https://myeverything.kr/sync/mentor/advise-gpt/";
+// - prod: https://myeverything.kr/sync/* (Nginx -> Next.js)
+// - web dev(expo 8081/19006): getApiBase()가 Next dev(3000)로 매핑
+function mentorPrimaryUrl() {
+  const base = getApiBase();
+  // trailing slash로 인한 308(Location) 리다이렉트 방지
+  return `${base}/sync/mentor/advise-gpt`;
+}
 // Fallback: 기존 Express MVP 엔드포인트(유지)
 const MENTOR_API_URL_FALLBACK = "https://myeverything.kr/api/mentor/advise";
 
@@ -211,7 +217,7 @@ export async function fetchMentorAdvice(params: {
 
     // 1) 새 엔드포인트 우선 시도
     try {
-      return await post(MENTOR_API_URL_PRIMARY);
+      return await post(mentorPrimaryUrl());
     } catch (e) {
       const msg = String(e);
       // 404(아직 미생성) / 기타 에러면 기존 엔드포인트로 폴백
