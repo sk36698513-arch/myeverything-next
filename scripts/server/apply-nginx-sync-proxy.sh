@@ -24,10 +24,12 @@ if [[ -z "$NGINX_T_OUT" ]]; then
 fi
 
 TARGET_FILE="$(
-  python3 - <<'PY'
-import re, sys
-domain = sys.argv[1]
-text = sys.stdin.read().splitlines()
+  NGINX_T_OUT="$NGINX_T_OUT" DOMAIN="$DOMAIN" python3 - <<'PY'
+import os, re
+
+domain = (os.environ.get("DOMAIN") or "").strip()
+text = (os.environ.get("NGINX_T_OUT") or "").splitlines()
+
 cur = None
 hit = None
 for line in text:
@@ -35,18 +37,20 @@ for line in text:
   if m:
     cur = m.group(1).strip()
     continue
-  if cur and ("server_name" in line) and (domain in line):
+  if cur and ("server_name" in line) and domain and (domain in line):
     hit = cur
     break
-if not hit:
+
+if not hit and domain:
   # fallback: sites-enabled/*.conf often includes domain in path
   for line in text:
-    if line.strip().startswith("# configuration file") and domain in line:
-      hit = line.split("configuration file",1)[1].split(":",1)[0].strip()
+    if line.strip().startswith("# configuration file") and (domain in line):
+      hit = line.split("configuration file", 1)[1].split(":", 1)[0].strip()
       break
+
 print(hit or "")
 PY
-)" <<<"$NGINX_T_OUT" "$DOMAIN"
+)"
 
 if [[ -z "$TARGET_FILE" ]]; then
   echo "failed: could not locate nginx config for domain=$DOMAIN" >&2
