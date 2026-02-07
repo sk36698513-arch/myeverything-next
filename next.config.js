@@ -1,7 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  basePath: '/next',
-  trailingSlash: true,
+  trailingSlash: false,
 };
 
 module.exports = nextConfig;
