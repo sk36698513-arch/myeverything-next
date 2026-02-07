@@ -59,6 +59,29 @@ cat ~/.ssh/github_actions_deploy
 - Next.js `npm ci` → `npm run build` → `pm2 restart`
 - mobile(Expo) `npx expo export --platform web --output-dir dist`
 
+## 4-1) (중요) 도메인에서 최신 웹(/app/) 보이게 하기
+
+도메인 `https://myeverything.kr/` 는 보통 `/app/` 로 리다이렉트되고,
+`/app/` 는 서버의 Expo web export(`mobile/dist`)를 정적으로 서빙합니다.
+
+만약 **도메인에서 옛날 버전이 보이면**, nginx가 `/app/` 를 다른(예전) 폴더로 서빙하거나
+브라우저 서비스워커/캐시가 남아있는 경우가 많습니다.
+
+### 서버에서 nginx /app/ 정적 서빙 적용(권장 1회)
+
+서버에서:
+
+```bash
+cd /var/www/myeverything-next
+APP_DIST="/var/www/myeverything-next/mobile/dist" DOMAIN="myeverything.kr" bash scripts/server/apply-nginx-app-static.sh
+```
+
+배포 스크립트는 `mobile/dist/version.txt` 를 생성하므로, 아래로 최신 반영 여부를 확인할 수 있습니다.
+
+```bash
+curl -s https://myeverything.kr/app/version.txt
+```
+
 ## 5) 문제 생기면 어디를 보나요?
 
 - GitHub → Actions 탭에서 배포 로그 확인

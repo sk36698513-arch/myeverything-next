@@ -49,6 +49,13 @@ if [[ -d "$ROOT_DIR/mobile" && -f "$ROOT_DIR/mobile/package.json" ]]; then
   fi
   # Export static web bundle to mobile/dist
   npx expo export --platform web --output-dir dist
+
+  # Stamp version file (helps verify that domain serves latest dist)
+  mkdir -p dist
+  {
+    echo "commit=$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    echo "builtAt=$(date -Iseconds)"
+  } > dist/version.txt
   popd >/dev/null
 else
   echo "Skip: mobile/ not found"
