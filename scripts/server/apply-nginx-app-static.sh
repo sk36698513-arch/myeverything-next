@@ -77,10 +77,6 @@ app_dist = sys.argv[3].rstrip("/") + "/"
 with open(path, "r", encoding="utf-8") as f:
   src = f.read()
 
-if "location ^~ /app/" in src or "location = /app/index.html" in src:
-  print("skip: /app static locations already exist")
-  raise SystemExit(0)
-
 lines = src.splitlines(True)
 
 def find_server_block_indices(lines, domain):
@@ -123,16 +119,46 @@ for k, line in enumerate(block_lines):
 if insert_at is None:
   insert_at = start + 1
 
-snippet = (
-  f"{indent}# Added by deploy script: serve Expo web at /app/\n"
-  f"{indent}location = /app {{ return 301 /app/; }}\n"
-  f"{indent}location = /app/index.html {{ add_header Cache-Control \"no-store\" always; }}\n"
-  f"{indent}location = /app/service-worker.js {{ add_header Cache-Control \"no-store\" always; }}\n"
-  f"{indent}location ^~ /app/ {{\n"
-  f"{indent}  alias {app_dist};\n"
-  f"{indent}  try_files $uri $uri/ /app/index.html;\n"
-  f"{indent}}}\n"
-)
+need = {
+  "app_static": "location ^~ /app/",
+  "app_index_nostore": "location = /app/index.html",
+  "app_sw_nostore": "location = /app/service-worker.js",
+  "app_version_nostore": "location = /app/version.txt",
+  "legacy_dashboard": "location = /dashboard.html",
+}
+
+missing = [k for k, marker in need.items() if marker not in src]
+if not missing:
+  print("skip: /app static + legacy redirects already exist")
+  raise SystemExit(0)
+
+snippet_lines = []
+snippet_lines.append(f"{indent}# Added by deploy script: serve Expo web at /app/ (and redirect legacy URLs)\n")
+
+# Legacy URLs: redirect old entry points to /app/
+if need["legacy_dashboard"] not in src:
+  snippet_lines.append(f"{indent}location = /dashboard.html {{ return 301 /app/; }}\n")
+  snippet_lines.append(f"{indent}location = /dashboard {{ return 301 /app/; }}\n")
+  snippet_lines.append(f"{indent}location = /dashboard/ {{ return 301 /app/; }}\n")
+
+# /app static serving + cache controls (avoid stale PWA)
+if "location = /app" not in src:
+  snippet_lines.append(f"{indent}location = /app {{ return 301 /app/; }}\n")
+
+if need["app_index_nostore"] not in src:
+  snippet_lines.append(f"{indent}location = /app/index.html {{ add_header Cache-Control \"no-store\" always; }}\n")
+if need["app_sw_nostore"] not in src:
+  snippet_lines.append(f"{indent}location = /app/service-worker.js {{ add_header Cache-Control \"no-store\" always; }}\n")
+if need["app_version_nostore"] not in src:
+  snippet_lines.append(f"{indent}location = /app/version.txt {{ add_header Cache-Control \"no-store\" always; }}\n")
+
+if need["app_static"] not in src:
+  snippet_lines.append(f"{indent}location ^~ /app/ {{\n")
+  snippet_lines.append(f"{indent}  alias {app_dist};\n")
+  snippet_lines.append(f"{indent}  try_files $uri $uri/ /app/index.html;\n")
+  snippet_lines.append(f"{indent}}}\n")
+
+snippet = "".join(snippet_lines)
 
 lines.insert(insert_at, snippet)
 dst = "".join(lines)
