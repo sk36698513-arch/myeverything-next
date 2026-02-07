@@ -40,51 +40,12 @@ function buildQuestion(params: { locale: Locale; message: string; history?: Ment
     .filter((h) => h.text.length > 0)
     .slice(-5); // 최근 5개만 전송
 
-  const factStyleHint =
-    locale === "en"
-      ? [
-          "FACT MODE ONLY.",
-          "- No emotions, empathy, encouragement, value judgments, or personal opinions.",
-          "- Do not output advice; only organize information logically.",
-          "- Separate Facts vs Assumptions clearly. If unknown, say 'Insufficient info'.",
-          "- Do NOT repeat the prompt or the conversation context.",
-          "- Output MUST be bullet points in this exact order:",
-          "  - Facts",
-          "  - Assumptions",
-          "  - Options (IF/THEN outcomes; conditional, not opinions)",
-          "  - Clarifying questions (max 3)",
-        ].join("\n")
-      : locale === "ja"
-        ? [
-            "FACTモードのみ。",
-            "・感情/共感/励まし/価値判断/個人の意見は禁止。",
-            "・助言はせず、情報を論理的に整理する。",
-            "・事実と推定を明確に分け、不明は「情報不足」と明記。",
-            "・プロンプト/会話履歴をそのまま出力しない。",
-            "・出力（箇条書きのみ、順番固定）:",
-            "  ・事実",
-            "  ・推定",
-            "  ・選択肢（IF/THENの条件付き結果。意見は書かない）",
-            "  ・確認質問（最大3）",
-          ].join("\n")
-        : [
-            "FACT 모드만.",
-            "- 감정/공감/격려/가치판단/개인 의견 금지.",
-            "- 조언하지 말고, 정보를 논리적으로 정리.",
-            "- 사실과 추정을 분리하고, 모르면 '정보 부족'으로 명시.",
-            "- 프롬프트/대화 히스토리를 그대로 출력하지 마.",
-            "- 출력(불릿만, 순서 고정):",
-            "  - 사실",
-            "  - 추정",
-            "  - 선택지(IF/THEN 결과. 의견 금지)",
-            "  - 확인 질문(최대 3)",
-          ].join("\n");
-
   if (tail.length === 0) {
-    return `${hintLine(locale)}\n${factStyleHint}\n\n${msg}`;
+    // 일반 ChatGPT 스타일(대화형 멘토)로 답변 받기
+    return `${hintLine(locale)}\n\n${msg}`;
   }
 
-  // 이전 대화가 감정적인 톤/규칙을 포함할 수 있어, 맥락은 최소한으로만 전달
+  // 맥락은 최소한으로만 전달(최근 5개)
   const ctx = tail
     .map((h) => {
       const t = normalizeText(h.text).replaceAll("\n", " ");
@@ -93,7 +54,7 @@ function buildQuestion(params: { locale: Locale; message: string; history?: Ment
     })
     .join("\n");
 
-  return `${hintLine(locale)}\n${factStyleHint}\n\nContext (last 5, reference only):\n${ctx}\n\nUser message:\n${msg}`;
+  return `${hintLine(locale)}\n\nRecent conversation (last 5):\n${ctx}\n\nUser message:\n${msg}`;
 }
 
 function cleanMentorReply(params: { raw: string; originalMessage: string; locale: Locale }) {
@@ -188,7 +149,8 @@ export async function fetchMentorAdvice(params: {
         // - 서버가 지원하면 max_output_tokens 로 "짧게" 고정
         body: JSON.stringify({
           question: buildQuestion({ locale, message, history }),
-          max_output_tokens: 220,
+          // 일반 대화형 답변이 가능하도록 출력 여유를 둠
+          max_output_tokens: 450,
         }),
         signal: controller.signal,
       });
