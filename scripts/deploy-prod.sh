@@ -80,7 +80,11 @@ echo "== Health checks =="
 # 항상 존재하는 /sync/logs 로 헬스체크(로그가 없어도 ok:true로 응답)
 # NOTE: 3xx(리다이렉트)도 "문제"로 보고 실패 처리해 Location 중복을 조기에 잡는다.
 HC_URL="http://127.0.0.1:${PORT}/sync/logs?n=1"
-HC_CODE="$(curl -sS -o /dev/null -w "%{http_code}" "$HC_URL" || echo "000")"
+HC_HEADERS=()
+if [[ -n "${SYNC_API_KEY:-}" ]]; then
+  HC_HEADERS=(-H "x-sync-key: ${SYNC_API_KEY}")
+fi
+HC_CODE="$(curl -sS -o /dev/null -w "%{http_code}" "${HC_HEADERS[@]}" "$HC_URL" || echo "000")"
 if [[ "$HC_CODE" != "200" ]]; then
   echo "healthcheck failed: $HC_URL (http $HC_CODE)" >&2
   exit 1
