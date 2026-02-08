@@ -10,6 +10,13 @@ function requireSyncKey(req: Request, headers: Record<string, string>) {
   const expected = (process.env.SYNC_API_KEY ?? "").trim();
   // If not configured, keep endpoint open (dev/transition). Set SYNC_API_KEY in prod to enforce.
   if (!expected) return null;
+
+  // Allow direct local calls (healthcheck / localhost debug).
+  // Requests coming through nginx should have x-real-ip/x-forwarded-for set by proxy_set_header.
+  const xff = (req.headers.get("x-forwarded-for") ?? "").trim();
+  const xr = (req.headers.get("x-real-ip") ?? "").trim();
+  if (!xff && !xr) return null;
+
   const got = (req.headers.get("x-sync-key") ?? "").trim();
   if (!got || got !== expected) {
     return json({ ok: false, message: "unauthorized" }, { status: 401, headers });
