@@ -10,12 +10,10 @@ function requireSyncKey(req: Request, headers: Record<string, string>) {
   if (!expected) return null;
 
   // Allow direct local calls (healthcheck / localhost debug).
-  // Requests coming through nginx should have x-real-ip/x-forwarded-for set by proxy_set_header.
-  const xff = (req.headers.get("x-forwarded-for") ?? "").trim();
-  const xr = (req.headers.get("x-real-ip") ?? "").trim();
-  const firstXff = xff ? xff.split(",")[0]!.trim() : "";
-  const isLocal = firstXff === "127.0.0.1" || firstXff === "::1" || xr === "127.0.0.1" || xr === "::1";
-  if (isLocal || (!xff && !xr)) return null;
+  // - deploy script hits http://127.0.0.1:${PORT}/... and will set Host accordingly.
+  // - keep public requests protected (Host=myeverything.kr).
+  const host = (req.headers.get("host") ?? "").trim().toLowerCase();
+  if (host.startsWith("127.0.0.1") || host.startsWith("localhost")) return null;
 
   const got = (req.headers.get("x-sync-key") ?? "").trim();
   if (!got || got !== expected) {
