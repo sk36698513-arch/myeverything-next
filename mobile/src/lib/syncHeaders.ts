@@ -14,7 +14,12 @@ export async function getSyncAuth() {
   const key = getSyncKey();
 
   const headers: Record<string, string> = { "x-device-id": deviceId };
-  if (key) headers["x-sync-key"] = key;
+  if (key) {
+    // Prefer standard header so proxies/servers are less likely to drop it
+    headers.authorization = `Bearer ${key}`;
+    // Keep legacy header too (useful for debugging)
+    headers["x-sync-key"] = key;
+  }
 
   return { deviceId, headers };
 }

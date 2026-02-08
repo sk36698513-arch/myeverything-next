@@ -17,7 +17,13 @@ function requireSyncKey(req: Request, headers: Record<string, string>) {
   const host = (req.headers.get("host") ?? "").trim().toLowerCase();
   if (host.startsWith("127.0.0.1") || host.startsWith("localhost")) return null;
 
-  const got = (req.headers.get("x-sync-key") ?? "").trim();
+  let got = (req.headers.get("x-sync-key") ?? "").trim();
+  if (!got) {
+    const auth = (req.headers.get("authorization") ?? "").trim();
+    if (auth.toLowerCase().startsWith("bearer ")) {
+      got = auth.slice(7).trim();
+    }
+  }
   if (!got || got !== expected) {
     return json({ ok: false, message: "unauthorized" }, { status: 401, headers });
   }
@@ -92,7 +98,7 @@ function corsHeaders(req: Request) {
   ]);
   const h: Record<string, string> = {
     "access-control-allow-methods": "POST,OPTIONS",
-    "access-control-allow-headers": "content-type,accept,x-device-id,x-sync-key",
+    "access-control-allow-headers": "content-type,accept,authorization,x-device-id,x-sync-key",
     "access-control-allow-credentials": "true",
   };
   if (allow.has(origin)) h["access-control-allow-origin"] = origin;
