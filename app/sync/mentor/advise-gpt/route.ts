@@ -15,7 +15,9 @@ function requireSyncKey(req: Request, headers: Record<string, string>) {
   // Requests coming through nginx should have x-real-ip/x-forwarded-for set by proxy_set_header.
   const xff = (req.headers.get("x-forwarded-for") ?? "").trim();
   const xr = (req.headers.get("x-real-ip") ?? "").trim();
-  if (!xff && !xr) return null;
+  const firstXff = xff ? xff.split(",")[0]!.trim() : "";
+  const isLocal = firstXff === "127.0.0.1" || firstXff === "::1" || xr === "127.0.0.1" || xr === "::1";
+  if (isLocal || (!xff && !xr)) return null;
 
   const got = (req.headers.get("x-sync-key") ?? "").trim();
   if (!got || got !== expected) {
