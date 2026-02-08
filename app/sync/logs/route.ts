@@ -5,7 +5,7 @@ import path from "node:path";
 export const runtime = "nodejs";
 
 function requireSyncKey(req: Request, headers: Record<string, string>) {
-  const expected = process.env.SYNC_API_KEY;
+  const expected = (process.env.SYNC_API_KEY ?? "").trim();
   // If not configured, keep endpoint open (dev/transition). Set SYNC_API_KEY in prod to enforce.
   if (!expected) return null;
   const got = (req.headers.get("x-sync-key") ?? "").trim();

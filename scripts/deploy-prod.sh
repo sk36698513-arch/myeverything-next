@@ -82,7 +82,9 @@ echo "== Health checks =="
 HC_URL="http://127.0.0.1:${PORT}/sync/logs?n=1"
 HC_HEADERS=()
 if [[ -n "${SYNC_API_KEY:-}" ]]; then
-  HC_HEADERS=(-H "x-sync-key: ${SYNC_API_KEY}")
+  # guard against CRLF in sourced env files
+  SYNC_API_KEY_CLEAN="${SYNC_API_KEY//$'\r'/}"
+  HC_HEADERS=(-H "x-sync-key: ${SYNC_API_KEY_CLEAN}")
 fi
 HC_CODE="$(curl -sS -o /dev/null -w "%{http_code}" "${HC_HEADERS[@]}" "$HC_URL" || echo "000")"
 if [[ "$HC_CODE" != "200" ]]; then
