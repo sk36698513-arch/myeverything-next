@@ -13,6 +13,20 @@ git rev-parse --is-inside-work-tree >/dev/null
 git fetch origin main
 git pull --ff-only origin main
 
+echo "== Load env (.env.production) =="
+# Optional: load server-only env vars (ignored by git)
+# - used for SYNC_API_KEY, OPENAI_API_KEY, EXPO_PUBLIC_* etc.
+# - file format: KEY=VALUE per line (no export needed)
+if [[ -f "$ROOT_DIR/.env.production" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ROOT_DIR/.env.production"
+  set +a
+  echo "loaded: $ROOT_DIR/.env.production"
+else
+  echo "skip: $ROOT_DIR/.env.production not found"
+fi
+
 echo "== Next.js install/build =="
 if [[ -f package-lock.json ]]; then
   npm ci
