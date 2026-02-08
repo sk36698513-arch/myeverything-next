@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { StatusBar } from "expo-status-bar";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
@@ -16,6 +16,7 @@ import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { SummaryScreen } from "./src/screens/SummaryScreen";
 import { AutobiographyScreen } from "./src/screens/AutobiographyScreen";
 import { Colors } from "./src/theme/colors";
+import { flushPendingSync } from "./src/storage/sync";
 
 enableScreens(true);
 
@@ -74,6 +75,10 @@ seedWebOfflineDemo();
 
 function AppInner() {
   const { t } = useI18n();
+  useEffect(() => {
+    // best-effort: try flushing any pending server sync queue
+    flushPendingSync().catch(() => {});
+  }, []);
   return (
     <NavigationContainer>
       <StatusBar style="dark" />

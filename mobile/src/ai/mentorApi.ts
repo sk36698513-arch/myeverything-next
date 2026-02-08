@@ -1,7 +1,7 @@
 import type { Locale } from "../i18n/translations";
 import { consumeMentorQuota, MentorQuotaError } from "../storage/mentorQuota";
 import { getApiBase } from "../lib/apiBase";
-import { getOrCreateDeviceId } from "../storage/device";
+import { getSyncAuth } from "../lib/syncHeaders";
 
 // Primary: Next.js(sync)에서 직접 ChatGPT 생성
 // - prod: https://myeverything.kr/sync/* (Nginx -> Next.js)
@@ -142,12 +142,12 @@ export async function fetchMentorAdvice(params: {
 
   try {
     // server-side quota key (preferred) — falls back to IP if omitted
-    const deviceId = await getOrCreateDeviceId();
+    const { deviceId, headers: syncHeaders } = await getSyncAuth();
 
     async function post(url: string) {
       const res = await fetch(url, {
         method: "POST",
-        headers: { "content-type": "application/json", accept: "application/json", "x-device-id": deviceId },
+        headers: { "content-type": "application/json", accept: "application/json", ...syncHeaders },
         // NOTE: backend expects `question` (not `message`)
         // - 대화 히스토리는 최근 5개만 포함
         // - 서버가 지원하면 max_output_tokens 로 "짧게" 고정

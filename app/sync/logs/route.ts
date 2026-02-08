@@ -1,8 +1,19 @@
 import { NextResponse } from "next/server";
-import { mkdir, appendFile, readFile } from "node:fs/promises";
+import { mkdir, appendFile, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export const runtime = "nodejs";
+
+function requireSyncKey(req: Request, headers: Record<string, string>) {
+  const expected = process.env.SYNC_API_KEY;
+  // If not configured, keep endpoint open (dev/transition). Set SYNC_API_KEY in prod to enforce.
+  if (!expected) return null;
+  const got = (req.headers.get("x-sync-key") ?? "").trim();
+  if (!got || got !== expected) {
+    return NextResponse.json({ ok: false, message: "unauthorized" }, { status: 401, headers });
+  }
+  return null;
+}
 
 type DailyLog = {
   id: string;
@@ -33,8 +44,8 @@ function corsHeaders(req: Request) {
     "https://myeverything.kr",
   ]);
   const h: Record<string, string> = {
-    "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "content-type,accept",
+    "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
+    "access-control-allow-headers": "content-type,accept,x-device-id,x-sync-key",
     "access-control-allow-credentials": "true",
   };
   if (allow.has(origin)) h["access-control-allow-origin"] = origin;
@@ -55,6 +66,8 @@ export async function OPTIONS(req: Request) {
 
 export async function POST(req: Request) {
   const headers = corsHeaders(req);
+  const auth = requireSyncKey(req, headers);
+  if (auth) return auth;
   try {
     const body = (await req.json().catch(() => null)) as null | { deviceId?: unknown; log?: unknown };
     const deviceId = typeof body?.deviceId === "string" ? body.deviceId.trim() : "";
@@ -86,6 +99,8 @@ export async function POST(req: Request) {
 
 export async function GET(req: Request) {
   const headers = corsHeaders(req);
+  const auth = requireSyncKey(req, headers);
+  if (auth) return auth;
   const url = new URL(req.url);
   const deviceId = (url.searchParams.get("deviceId") ?? "").trim();
   const startISO = url.searchParams.get("startISO");
@@ -128,7 +143,7 @@ export async function GET(req: Request) {
       return ok({ ok: true, logs: out.slice(0, limit) }, 200, headers);
     }
 
-    // Debug mode: 최근 N줄 보기
+    // Debug mode: 최근 N줄 보기 (admin/auth only)
     const tail = lines.slice(-n).map((l) => {
       try {
         return JSON.parse(l);
@@ -140,6 +155,53 @@ export async function GET(req: Request) {
   } catch {
     if (deviceId) return ok({ ok: true, logs: [] }, 200, headers);
     return ok({ ok: true, count: 0, tail: [] }, 200, headers);
+  }
+}
+
+export async function DELETE(req: Request) {
+  const headers = corsHeaders(req);
+  const auth = requireSyncKey(req, headers);
+  if (auth) return auth;
+
+  try {
+    const body = (await req.json().catch(() => null)) as null | { deviceId?: unknown };
+    const deviceId = typeof body?.deviceId === "string" ? body.deviceId.trim() : "";
+    if (!deviceId) return ok({ ok: false, message: "deviceId required" }, 400, headers);
+
+    const file = dataPath("logs", "logs.jsonl");
+    let raw = "";
+    try {
+      raw = await readFile(file, "utf8");
+    } catch {
+      return ok({ ok: true, deleted: 0, remaining: 0 }, 200, headers);
+    }
+
+    const lines = raw.split("\n");
+    let deleted = 0;
+    const kept: string[] = [];
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const row = JSON.parse(line) as LogRow;
+        if (row?.deviceId === deviceId) {
+          deleted += 1;
+          continue;
+        }
+      } catch {
+        // keep malformed lines
+      }
+      kept.push(line);
+    }
+
+    const dir = dataPath("logs");
+    await mkdir(dir, { recursive: true });
+    const tmp = `${file}.tmp`;
+    await writeFile(tmp, kept.length ? `${kept.join("\n")}\n` : "", "utf8");
+    await rename(tmp, file);
+
+    return ok({ ok: true, deleted, remaining: kept.length }, 200, headers);
+  } catch {
+    return ok({ ok: false, message: "server_error" }, 500, headers);
   }
 }
 

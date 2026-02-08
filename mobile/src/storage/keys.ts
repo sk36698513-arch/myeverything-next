@@ -5,6 +5,7 @@ export const StorageKeys = {
   locale: "@my-everything/locale",
   deviceId: "@my-everything/deviceId",
   mentorQuota: "@my-everything/mentorQuota",
+  pendingSync: "@my-everything/pendingSync",
 } as const;
 
 export type StorageKey = (typeof StorageKeys)[keyof typeof StorageKeys];

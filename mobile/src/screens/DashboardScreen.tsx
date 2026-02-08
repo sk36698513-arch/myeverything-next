@@ -25,6 +25,7 @@ import { fetchMentorAdvice } from "../ai/mentorApi";
 import { isMentorQuotaError } from "../ai/mentorApi";
 import { makeAssistantReply } from "../ai/assistant";
 import { getMentorQuotaStatus } from "../storage/mentorQuota";
+import { flushPendingSync, getPendingSyncCount } from "../storage/sync";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Dashboard">;
 
@@ -55,6 +56,7 @@ export function DashboardScreen({ navigation }: Props) {
   const [savedNoticeVisible, setSavedNoticeVisible] = useState(false);
   const savedNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<ScrollView | null>(null);
+  const [pendingSyncCount, setPendingSyncCount] = useState<number>(0);
 
   useEffect(() => {
     return () => {
@@ -66,6 +68,10 @@ export function DashboardScreen({ navigation }: Props) {
   useEffect(() => {
     const unsub = navigation.addListener("focus", () => {
       loadLogs().then(setLogs);
+      getPendingSyncCount().then(setPendingSyncCount).catch(() => {});
+      flushPendingSync()
+        .then((r) => setPendingSyncCount(r.pending))
+        .catch(() => {});
       // 서버 AI 사용량 표시(5회/일 + 60초 쿨다운)
       getMentorQuotaStatus()
         .then((s) => {
@@ -356,6 +362,15 @@ export function DashboardScreen({ navigation }: Props) {
           </View>
 
           {savedNoticeVisible ? <Text style={styles.savedNotice}>{t("savedNotice")}</Text> : null}
+          {pendingSyncCount > 0 ? (
+            <Text style={styles.miniHint}>
+              {locale === "en"
+                ? `Server sync pending: ${pendingSyncCount}`
+                : locale === "ja"
+                  ? `サーバー同期待ち: ${pendingSyncCount}`
+                  : `서버 동기화 대기: ${pendingSyncCount}`}
+            </Text>
+          ) : null}
           <Text style={styles.footnote}>{t("hintRecordSpace")}</Text>
         </View>
 

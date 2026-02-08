@@ -6,6 +6,17 @@ export const runtime = "nodejs";
 
 const MODEL = "gpt-4.1-mini";
 
+function requireSyncKey(req: Request, headers: Record<string, string>) {
+  const expected = process.env.SYNC_API_KEY;
+  // If not configured, keep endpoint open (dev/transition). Set SYNC_API_KEY in prod to enforce.
+  if (!expected) return null;
+  const got = (req.headers.get("x-sync-key") ?? "").trim();
+  if (!got || got !== expected) {
+    return json({ ok: false, message: "unauthorized" }, { status: 401, headers });
+  }
+  return null;
+}
+
 const QuotaLimits = {
   dailyMaxRequests: 5,
   cooldownMs: 60_000,
@@ -74,7 +85,7 @@ function corsHeaders(req: Request) {
   ]);
   const h: Record<string, string> = {
     "access-control-allow-methods": "POST,OPTIONS",
-    "access-control-allow-headers": "content-type,accept,x-device-id",
+    "access-control-allow-headers": "content-type,accept,x-device-id,x-sync-key",
     "access-control-allow-credentials": "true",
   };
   if (allow.has(origin)) h["access-control-allow-origin"] = origin;
@@ -101,6 +112,8 @@ export async function OPTIONS(req: Request) {
 
 export async function POST(req: Request) {
   const headers = corsHeaders(req);
+  const auth = requireSyncKey(req, headers);
+  if (auth) return auth;
   try {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return json({ ok: false, message: "OPENAI_API_KEY missing" }, { status: 500, headers });

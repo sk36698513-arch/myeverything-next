@@ -1,6 +1,6 @@
 import type { DailyLog } from "../types";
 import { getApiBase } from "../lib/apiBase";
-import { getOrCreateDeviceId } from "./device";
+import { getSyncAuth } from "../lib/syncHeaders";
 
 export async function fetchServerLogs(params: {
   startISO?: string;
@@ -9,7 +9,7 @@ export async function fetchServerLogs(params: {
   timeoutMs?: number;
 }): Promise<DailyLog[]> {
   const base = getApiBase();
-  const deviceId = await getOrCreateDeviceId();
+  const { deviceId, headers: syncHeaders } = await getSyncAuth();
   const limit = Math.min(Math.max(params.limit ?? 5000, 1), 5000);
   const timeoutMs = Math.min(Math.max(params.timeoutMs ?? 15000, 2000), 30000);
 
@@ -25,7 +25,7 @@ export async function fetchServerLogs(params: {
   try {
     const res = await fetch(url.toString(), {
       method: "GET",
-      headers: { accept: "application/json" },
+      headers: { accept: "application/json", ...syncHeaders },
       signal: controller.signal,
     });
     if (!res.ok) throw new Error(`server_logs_http_${res.status}`);
