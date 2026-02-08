@@ -1,11 +1,60 @@
 import { NextResponse } from "next/server";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import path from "node:path";
 
 export const runtime = "nodejs";
 
 const MODEL = "gpt-4.1-mini";
 
+const QuotaLimits = {
+  dailyMaxRequests: 5,
+  cooldownMs: 60_000,
+  dailyMaxTokens: 9_000,
+} as const;
+
+type QuotaState = {
+  day: string; // YYYY-MM-DD
+  reqCount: number;
+  tokenCount: number;
+  lastAtMs: number;
+};
+
 function clamp(n: number, min: number, max: number) {
   return Math.min(Math.max(n, min), max);
+}
+
+function dayKeyUtc(d = new Date()) {
+  return d.toISOString().slice(0, 10);
+}
+
+function estimateTokens(text: string) {
+  // rough estimate; similar to client-side heuristic (Korean can be denser)
+  return Math.ceil(text.length / 3.5);
+}
+
+function dataPath(...parts: string[]) {
+  return path.join(process.cwd(), "data", ...parts);
+}
+
+async function readQuotaMap(): Promise<Record<string, QuotaState>> {
+  try {
+    const raw = await readFile(dataPath("mentor", "quota.json"), "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return {};
+    return parsed as Record<string, QuotaState>;
+  } catch {
+    return {};
+  }
+}
+
+async function writeQuotaMap(map: Record<string, QuotaState>) {
+  const dir = dataPath("mentor");
+  await mkdir(dir, { recursive: true });
+  const file = dataPath("mentor", "quota.json");
+  const tmp = `${file}.tmp`;
+  const payload = JSON.stringify(map);
+  await writeFile(tmp, payload, "utf8");
+  await rename(tmp, file);
 }
 
 function json(data: unknown, init?: { status?: number; headers?: Record<string, string> }) {
@@ -25,11 +74,25 @@ function corsHeaders(req: Request) {
   ]);
   const h: Record<string, string> = {
     "access-control-allow-methods": "POST,OPTIONS",
-    "access-control-allow-headers": "content-type,accept",
+    "access-control-allow-headers": "content-type,accept,x-device-id",
     "access-control-allow-credentials": "true",
   };
   if (allow.has(origin)) h["access-control-allow-origin"] = origin;
   return h;
+}
+
+function getClientKey(req: Request, deviceId?: string) {
+  const d = (deviceId ?? "").trim();
+  if (d) return `d:${d}`;
+
+  const xff = (req.headers.get("x-forwarded-for") ?? "").trim();
+  if (xff) {
+    const first = xff.split(",")[0]?.trim();
+    if (first) return `ip:${first}`;
+  }
+  const xr = (req.headers.get("x-real-ip") ?? "").trim();
+  if (xr) return `ip:${xr}`;
+  return "ip:unknown";
 }
 
 export async function OPTIONS(req: Request) {
@@ -42,7 +105,11 @@ export async function POST(req: Request) {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return json({ ok: false, message: "OPENAI_API_KEY missing" }, { status: 500, headers });
 
-    const body = (await req.json().catch(() => null)) as null | { question?: unknown; max_output_tokens?: unknown };
+    const body = (await req.json().catch(() => null)) as null | {
+      question?: unknown;
+      max_output_tokens?: unknown;
+      deviceId?: unknown;
+    };
     const question = typeof body?.question === "string" ? body.question.trim() : "";
     if (!question) return json({ ok: false, message: "question required" }, { status: 400, headers });
 
@@ -51,6 +118,65 @@ export async function POST(req: Request) {
       64,
       600
     );
+
+    // Server-side quota (deviceId preferred; fallback to IP)
+    const deviceId = typeof body?.deviceId === "string" ? body.deviceId.trim() : "";
+    const key = getClientKey(req, deviceId || (req.headers.get("x-device-id") ?? ""));
+    const now = Date.now();
+    const today = dayKeyUtc();
+
+    const map = await readQuotaMap();
+    // keep file small: drop non-today entries
+    for (const [k, v] of Object.entries(map)) {
+      if (!v || typeof v !== "object" || (v as any).day !== today) delete map[k];
+    }
+    const existing = map[key] ?? { day: today, reqCount: 0, tokenCount: 0, lastAtMs: 0 };
+    const state: QuotaState =
+      existing.day === today ? existing : { day: today, reqCount: 0, tokenCount: 0, lastAtMs: 0 };
+
+    const nextAllowedInMs =
+      state.lastAtMs && now - state.lastAtMs < QuotaLimits.cooldownMs ? QuotaLimits.cooldownMs - (now - state.lastAtMs) : 0;
+
+    if (nextAllowedInMs > 0) {
+      const h = { ...headers, "retry-after": String(Math.ceil(nextAllowedInMs / 1000)) };
+      return json(
+        {
+          ok: false,
+          message: "mentor_rate_limited",
+          nextAllowedInMs,
+          limit: QuotaLimits.cooldownMs,
+        },
+        { status: 429, headers: h }
+      );
+    }
+
+    const inTok = estimateTokens(question);
+    const cost = inTok + maxOut;
+    const wouldExceedReq = state.reqCount + 1 > QuotaLimits.dailyMaxRequests;
+    const wouldExceedTok = state.tokenCount + cost > QuotaLimits.dailyMaxTokens;
+    if (wouldExceedReq || wouldExceedTok) {
+      return json(
+        {
+          ok: false,
+          message: "mentor_quota_exceeded",
+          day: state.day,
+          usedRequests: state.reqCount,
+          maxRequests: QuotaLimits.dailyMaxRequests,
+          usedTokens: state.tokenCount,
+          maxTokens: QuotaLimits.dailyMaxTokens,
+        },
+        { status: 429, headers }
+      );
+    }
+
+    // reserve quota before OpenAI call
+    map[key] = {
+      day: today,
+      reqCount: state.reqCount + 1,
+      tokenCount: state.tokenCount + cost,
+      lastAtMs: now,
+    };
+    await writeQuotaMap(map);
 
     const system = [
       "You are an AI mentor in a journaling app.",
